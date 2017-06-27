@@ -6,10 +6,10 @@ subimission.csv  : project_Id and final status
 import pandas as pd
 import numpy as np
 import seaborn as sns
-
-
-# load the taining data
+from bs4 import BeautifulSoup
+# load taining data
 train_data= pd.read_csv('train.csv')
+# load test data
 test_data= pd.read_csv('test.csv')
 
 train_data.shape   # rows= 108129 col= 14
@@ -76,3 +76,87 @@ for i in np.arange(train_data.shape[0]):
 
 train_data['time1']= np.log(time1)
 train_data['time2']= np.log(time2)
+
+# for test data
+time3 =[]
+time4 = []
+for i in np.arange(test_data.shape[0]):
+    time3.append(np.round((test_data.loc[i,'launched_at'] - test_data.loc[i,'created_at']).total_seconds()).astype('int'))
+    time4.append(np.round((test_data.loc[i,'deadline'] - test_data.loc[i,'launched_at']).total_seconds()).astype('int'))
+
+test_data['time1']= np.log(time3)
+test_data['time2']= np.log(time4)
+
+feat= ['disable_communication','country']
+from sklearn.preprocessing import LabelEncoder
+le= LabelEncoder()
+for i in feat:
+    le.fit(list(train_data[i].values)+ list(test_data[i].values))
+    train_data[i]= le.transform(list(train_data[i]))
+    test_data[i]= le.transform(list(test_data[i]))
+
+train_data['goal']= np.log1p(train_data['goal'])
+test_data['goal']= np.log1p(test_data['goal'])
+
+
+# cleaning Text 
+#creating full list of descriptions from train and test data
+tdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype('str')
+kdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype('str')
+##########################################################################################
+import re
+def desc_clean(word):
+    p1 = re.sub(pattern='(\W+)|(\d+)|(\s+)',repl=' ',string=word)
+    p1 = p1.lower()
+    return p1
+'''
+\W :	Matches nonword characters
+\d:    Matches digits. Equivalent to [0-9].
+\s:    Matches whitespace. Equivalent to [\t\n\r\f].                              
+'''
+tdesc= tdesc.map(desc_clean)
+
+# or  
+
+#def text_clean(raw):
+#    letters_only = re.sub("[^a-zA-Z\s]", " ", raw)
+#    letters_only= re.sub("(\s+)", " ", letters_only)
+#    return letters_only.lower()
+#
+#kdesc= kdesc.map(text_clean)
+
+from nltk.corpus import stopwords
+
+stop_word= set(stopwords.words('english'))
+tdesc = [[x for x in x.split() if x not in stop_word] for x in tdesc ]
+
+
+from nltk.stem.snowball import SnowballStemmer
+stemmer = SnowballStemmer(language= 'english')
+tdesc = [[stemmer.stem(x) for x in x] for x in tdesc]
+tdesc = [[x for x in x if len(x) > 2] for x in tdesc]
+tdesc = [' '.join(x) for x in tdesc]
+
+
+
+# creating count features
+from sklearn.feature_extraction.text import CountVectorizer
+cv= CountVectorizer(max_features=650)
+alldesc = cv.fit_transform(tdesc).todense()
+
+alldesc_df = pd.DataFrame(alldesc)
+alldesc_df.rename(columns = lambda x : 'varialbe_' + str(x),inplace= True)
+
+
+# text features split
+train_text= alldesc_df[:train_data.shape[0]]
+test_text = alldesc_df[train_data.shape[0]:]
+
+test_text.reset_index(drop= True, inplace= True)
+
+cols_to_use = ['name_len','desc_len','keywords_len','name_count','desc_count','keywords_count','time1','time3','goal']
+target=train_data['final_status']
+
+train_data=train_data.loc[:,cols_to_use]
+test_data= test_data.loc[:,cols_to_use]
+
