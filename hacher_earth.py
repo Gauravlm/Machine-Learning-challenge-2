@@ -6,7 +6,8 @@ subimission.csv  : project_Id and final status
 import pandas as pd
 import numpy as np
 import seaborn as sns
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoupb
+import xgboost as xgb
 # load taining data
 train_data= pd.read_csv('train.csv')
 # load test data
@@ -40,10 +41,10 @@ for x in unix_tcol:
 col_to_use= ['name','desc']
 len_feats= ['name_len','desc_len']
 count_feats= ['name_counts','desc_counts']
-
+    
 for i in np.arange(2):
-    train_data[i] = train_data[col_to_use[i]].str.split().str.len()  
-    test_data[i]= test_data[col_to_use[i]].str.split().str.len()
+    train_data[len_feats[i]] = train_data[col_to_use[i]].apply(str).apply(len)  
+    test_data[len_feats[i]]= test_data[col_to_use[i]].apply(str).apply(len)
     
     
 train_data['name_counts']=train_data['name'].str.split().str.len()
@@ -89,8 +90,9 @@ test_data['time2']= np.log(time4)
 
 feat= ['disable_communication','country']
 from sklearn.preprocessing import LabelEncoder
-le= LabelEncoder()
+
 for i in feat:
+    le= LabelEncoder()
     le.fit(list(train_data[i].values)+ list(test_data[i].values))
     train_data[i]= le.transform(list(train_data[i]))
     test_data[i]= le.transform(list(test_data[i]))
@@ -101,8 +103,8 @@ test_data['goal']= np.log1p(test_data['goal'])
 
 # cleaning Text 
 #creating full list of descriptions from train and test data
-tdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype('str')
-kdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype('str')
+tdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype(str)
+#kdesc = pd.Series(train_data['desc'].tolist()  + test_data['desc'].tolist()).astype('str')
 ##########################################################################################
 import re
 def desc_clean(word):
@@ -160,3 +162,36 @@ target=train_data['final_status']
 train_data=train_data.loc[:,cols_to_use]
 test_data= test_data.loc[:,cols_to_use]
 
+x_train= pd.concat([train_data,train_text],axis=1)
+x_test= pd.concat([test_data,test_text],axis=1)
+
+print(x_train.shape)
+print(x_test.shape)
+
+
+
+
+# Model Training 
+dtrain= xgb.DMatrix(data=x_train,label= target)
+dtest= xgb.DMatrix(data=x_test)
+
+params = {
+    'objective':'binary:logistic',
+    'eval_metric':'error',
+    'eta':0.025,
+    'max_depth':6,
+    'subsample':0.7,
+    'colsample_bytree':0.7,
+    'min_child_weight':5}
+    
+bst = xgb.cv(params, dtrain, num_boost_round=1000, early_stopping_rounds=40, nfold=5, verbose_eval=10)
+
+bst_train = xgb.train(params, dtrain, num_boost_round=1000)
+p_test = bst_train.predict(dtest)
+
+sub = pd.DataFrame()
+sub['project_id'] = test_data['project_id']
+sub['final_status'] = p_test
+   
+sub['final_status'] = [1 if x > 0.5 else 0 for x in sub['final_status']]
+sub.to_csv("xgb_with_python_feats.csv",index=False)   
